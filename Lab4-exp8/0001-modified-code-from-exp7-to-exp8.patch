@@ -1,0 +1,122 @@
+From bab0b50e8f44d2f8aec45c072cfeb005690851ad Mon Sep 17 00:00:00 2001
+From: Smith-xuan <731792865@qq.com>
+Date: Mon, 19 Sep 2022 09:30:48 +0800
+Subject: [PATCH] modified code from exp7 to exp8
+
+---
+ mycpu_top.v | 34 ++++++++++++++++++++++------------
+ 1 file changed, 22 insertions(+), 12 deletions(-)
+
+diff --git a/mycpu_top.v b/mycpu_top.v
+index 2d3a84a..2b00658 100644
+--- a/mycpu_top.v
++++ b/mycpu_top.v
+@@ -142,7 +142,7 @@ reg [31:0] final_result_WB;
+ 
+ 
+ wire IFreg_ready_go = 1'b1;
+-wire IDreg_ready_go = 1'b1;
++wire IDreg_ready_go = (!valid_ID) ? 1: (RAW_dep ? 1'b0 : 1'b1);
+ wire EXEreg_ready_go = 1'b1;
+ wire MEMreg_ready_go = 1'b1;
+ wire WBreg_ready_go = 1'b1;
+@@ -171,9 +171,9 @@ assign MEM_to_WB_valid = valid_MEM && MEMreg_ready_go;
+ 
+ 
+ assign seq_pc       = pc + 3'h4;
+-assign nextpc       = br_taken ? br_target : seq_pc;
+-
++assign nextpc       = (br_taken) ? br_target : seq_pc;
+ 
++//IF
+ always @(posedge clk) begin
+     if (reset) begin
+         pc <= 32'h1bfffffc;
+@@ -186,32 +186,32 @@ always @(posedge clk) begin
+         valid <= 1'b0;
+     end
+ 
+-    if(to_IF_valid && IFreg_allowin) begin
++    if(to_IF_valid && IFreg_allowin && IDreg_ready_go) begin
+         pc <= nextpc;
+     end
+ 
+ end
+ 
+-
++//ID
+ always @(posedge clk) begin
+     if(reset) begin
+         valid_ID <= 1'b0;
+     end
+-    else if(br_taken) begin
++    else if(br_taken && IDreg_ready_go) begin
+         valid_ID <= 1'b0;
+     end
+     else if(IDreg_allowin)begin
+         valid_ID <= IF_to_ID_valid;
+     end
+ 
+-    if(IF_to_ID_valid && IDreg_allowin)begin
++    if(IF_to_ID_valid && IDreg_allowin )begin
+         pc_ID <= pc;
+         inst_ID <= inst;
+     end
+ 
+ end
+ 
+-
++//EXE
+ always @(posedge clk) begin
+     if(reset) begin
+         valid_EXE <= 1'b0;
+@@ -234,7 +234,7 @@ always @(posedge clk) begin
+     end
+ end
+ 
+-
++//MEM
+ always @(posedge clk) begin
+     if(reset) begin
+         valid_MEM <= 1'b0;
+@@ -252,7 +252,7 @@ always @(posedge clk) begin
+     end
+ end
+ 
+-
++//WB
+ always @(posedge clk) begin
+     if(reset) begin
+         valid_WB <= 1'b0;
+@@ -269,8 +269,18 @@ always @(posedge clk) begin
+     end
+ end
+ 
++//about RAW
++wire is_rj_rk_inst = inst_add_w | inst_sub_w | inst_slt | inst_sltu | inst_and | inst_or | inst_nor | inst_xor;
++wire is_rj_imm_inst = inst_addi_w | inst_slli_w | inst_srli_w | inst_srai_w | inst_jirl | inst_ld_w;
++wire is_rj_rd_inst = inst_beq | inst_bne;
++wire is_rd_inst = inst_st_w;
++wire RAW_EXE = gr_we_EXE & valid_EXE & ((is_rj_rk_inst & ((rj == dest_EXE) | (rk == dest_EXE))) | (is_rj_imm_inst & (rj == dest_EXE)) | (is_rj_rd_inst & ((rj == dest_EXE) | (rd == dest_EXE))) | (is_rd_inst & (rd == dest_EXE)));
++wire RAW_MEM = gr_we_MEM & valid_MEM & ((is_rj_rk_inst & ((rj == dest_MEM) | (rk == dest_MEM))) | (is_rj_imm_inst & (rj == dest_MEM)) | (is_rj_rd_inst & ((rj == dest_MEM) | (rd == dest_MEM))) | (is_rd_inst & (rd == dest_MEM)));
++wire RAW_WB = gr_we_WB & valid_WB & ((is_rj_rk_inst & ((rj == dest_WB) | (rk == dest_WB))) | (is_rj_imm_inst & (rj == dest_WB)) | (is_rj_rd_inst & ((rj == dest_WB) | (rd == dest_WB))) | (is_rd_inst & (rd == dest_WB)));
++wire RAW_dep = RAW_EXE | RAW_MEM | RAW_WB;
++
+ 
+-assign inst_sram_en    = 1'b1;
++assign inst_sram_en    = br_taken ? 1'b1 : IDreg_ready_go;
+ assign inst_sram_we    = 4'b0;
+ assign inst_sram_addr  = nextpc;
+ assign inst_sram_wdata = 32'b0;
+@@ -388,7 +398,7 @@ assign br_taken = (   inst_beq  &&  rj_eq_rd
+                    || inst_jirl
+                    || inst_bl
+                    || inst_b
+-                  ) && valid_ID;
++                  ) && valid_ID && IDreg_ready_go;
+ assign br_target = (inst_beq || inst_bne || inst_bl || inst_b) ? (pc_ID + br_offs) :
+                                                    /*inst_jirl*/ (rj_value + jirl_offs);
+ 
+-- 
+2.37.3.windows.1
+

@@ -1,0 +1,102 @@
+From 3f11653905fd9d567b499164a9d95286edd3dbcf Mon Sep 17 00:00:00 2001
+From: Smith-xuan <731792865@qq.com>
+Date: Thu, 22 Sep 2022 10:14:05 +0800
+Subject: [PATCH] Modified exp-9 RTL from exp-8 RTL
+
+---
+ mycpu_top.v | 44 +++++++++++++++++++++++++++++++++++---------
+ 1 file changed, 35 insertions(+), 9 deletions(-)
+
+diff --git a/mycpu_top.v b/mycpu_top.v
+index 2b00658..9496424 100644
+--- a/mycpu_top.v
++++ b/mycpu_top.v
+@@ -92,6 +92,11 @@ wire        need_si20;
+ wire        need_si26;
+ wire        src2_is_4;
+ 
++wire        RAW_dep;
++wire        RAW_EXE;
++wire        RAW_MEM;
++wire        RAW_WB;
++
+ wire [ 4:0] rf_raddr1;
+ wire [31:0] rf_rdata1;
+ wire [ 4:0] rf_raddr2;
+@@ -126,6 +131,7 @@ reg [11:0] alu_op_EXE;
+ reg [3:0]  data_sram_we_EXE;
+ reg        data_sram_en_EXE;
+ reg [31:0] rkd_value_EXE;
++reg        inst_ld_w_EXE;
+ 
+ reg [31:0] pc_MEM;
+ reg        valid_MEM;
+@@ -142,7 +148,7 @@ reg [31:0] final_result_WB;
+ 
+ 
+ wire IFreg_ready_go = 1'b1;
+-wire IDreg_ready_go = (!valid_ID) ? 1: (RAW_dep ? 1'b0 : 1'b1);
++wire IDreg_ready_go = (!valid_ID) ? 1'b1: ((inst_ld_w_EXE && RAW_EXE) ? 1'b0 : 1'b1);
+ wire EXEreg_ready_go = 1'b1;
+ wire MEMreg_ready_go = 1'b1;
+ wire WBreg_ready_go = 1'b1;
+@@ -231,6 +237,7 @@ always @(posedge clk) begin
+         data_sram_we_EXE <= {4{mem_we}};
+         data_sram_en_EXE <= (mem_we || inst_ld_w);
+         rkd_value_EXE <= rkd_value;
++        inst_ld_w_EXE <= inst_ld_w;
+     end
+ end
+ 
+@@ -272,12 +279,25 @@ end
+ //about RAW
+ wire is_rj_rk_inst = inst_add_w | inst_sub_w | inst_slt | inst_sltu | inst_and | inst_or | inst_nor | inst_xor;
+ wire is_rj_imm_inst = inst_addi_w | inst_slli_w | inst_srli_w | inst_srai_w | inst_jirl | inst_ld_w;
+-wire is_rj_rd_inst = inst_beq | inst_bne;
+-wire is_rd_inst = inst_st_w;
+-wire RAW_EXE = gr_we_EXE & valid_EXE & ((is_rj_rk_inst & ((rj == dest_EXE) | (rk == dest_EXE))) | (is_rj_imm_inst & (rj == dest_EXE)) | (is_rj_rd_inst & ((rj == dest_EXE) | (rd == dest_EXE))) | (is_rd_inst & (rd == dest_EXE)));
+-wire RAW_MEM = gr_we_MEM & valid_MEM & ((is_rj_rk_inst & ((rj == dest_MEM) | (rk == dest_MEM))) | (is_rj_imm_inst & (rj == dest_MEM)) | (is_rj_rd_inst & ((rj == dest_MEM) | (rd == dest_MEM))) | (is_rd_inst & (rd == dest_MEM)));
+-wire RAW_WB = gr_we_WB & valid_WB & ((is_rj_rk_inst & ((rj == dest_WB) | (rk == dest_WB))) | (is_rj_imm_inst & (rj == dest_WB)) | (is_rj_rd_inst & ((rj == dest_WB) | (rd == dest_WB))) | (is_rd_inst & (rd == dest_WB)));
+-wire RAW_dep = RAW_EXE | RAW_MEM | RAW_WB;
++wire is_rj_rd_inst = inst_beq | inst_bne | inst_st_w;
++wire is_rd_inst = 1'b0;
++assign RAW_EXE = gr_we_EXE & valid_EXE & ((is_rj_rk_inst & ((rj == dest_EXE) | (rk == dest_EXE))) | (is_rj_imm_inst & (rj == dest_EXE)) | (is_rj_rd_inst & ((rj == dest_EXE) | (rd == dest_EXE))) | (is_rd_inst & (rd == dest_EXE)));
++assign RAW_MEM = gr_we_MEM & valid_MEM & ((is_rj_rk_inst & ((rj == dest_MEM) | (rk == dest_MEM))) | (is_rj_imm_inst & (rj == dest_MEM)) | (is_rj_rd_inst & ((rj == dest_MEM) | (rd == dest_MEM))) | (is_rd_inst & (rd == dest_MEM)));
++assign RAW_WB = gr_we_WB & valid_WB & ((is_rj_rk_inst & ((rj == dest_WB) | (rk == dest_WB))) | (is_rj_imm_inst & (rj == dest_WB)) | (is_rj_rd_inst & ((rj == dest_WB) | (rd == dest_WB))) | (is_rd_inst & (rd == dest_WB)));
++assign RAW_dep = RAW_EXE | RAW_MEM | RAW_WB;
++
++wire [1:0] sel_fwd_1;
++assign sel_fwd_1 = (gr_we_EXE & valid_EXE & ((is_rj_rk_inst & (rj == dest_EXE)) | (is_rj_imm_inst & (rj == dest_EXE)) | (is_rj_rd_inst & (rj == dest_EXE)))) ? 2'b01 :
++                   ((gr_we_MEM & valid_MEM & ((is_rj_rk_inst & (rj == dest_MEM)) | (is_rj_imm_inst & (rj == dest_MEM)) | (is_rj_rd_inst & (rj == dest_MEM)))) ? 2'b10 :
++                   ((gr_we_WB & valid_WB & ((is_rj_rk_inst & (rj == dest_WB)) | (is_rj_imm_inst & (rj == dest_WB)) | (is_rj_rd_inst & (rj == dest_WB)))) ? 2'b11 : 2'b00));
++wire [1:0] sel_fwd_2;
++assign sel_fwd_2 = (gr_we_EXE & valid_EXE & ((is_rj_rk_inst & (rk == dest_EXE)) | (is_rj_rd_inst & (rd == dest_EXE)) | (is_rd_inst & (rd == dest_EXE)))) ? 2'b01 :
++                   ((gr_we_MEM & valid_MEM & ((is_rj_rk_inst & (rk == dest_MEM)) | (is_rd_inst & (rd == dest_MEM)) | (is_rj_rd_inst & (rd == dest_MEM)))) ? 2'b10 :
++                   ((gr_we_WB & valid_WB & ((is_rj_rk_inst & (rk == dest_WB)) | (is_rd_inst & (rd == dest_WB)) | (is_rj_rd_inst & (rd == dest_WB)))) ? 2'b11 : 2'b00));
++
++wire [31:0] fwddata_EXE = alu_result;
++wire [31:0] fwddata_MEM = final_result;
++wire [31:0] fwddata_WB = final_result_WB;
+ 
+ 
+ assign inst_sram_en    = br_taken ? 1'b1 : IDreg_ready_go;
+@@ -389,8 +409,14 @@ regfile u_regfile(
+     .wdata  (rf_wdata )
+     );
+ 
+-assign rj_value  = rf_rdata1;
+-assign rkd_value = rf_rdata2;
++assign rj_value  = {32{(!sel_fwd_1[1] & sel_fwd_1[0])}} & fwddata_EXE |
++                   {32{(sel_fwd_1[1] & !sel_fwd_1[0])}} & fwddata_MEM |
++                   {32{(sel_fwd_1[1] & sel_fwd_1[0])}} & fwddata_WB |
++                   {32{(!sel_fwd_1[1] & !sel_fwd_1[0])}} & rf_rdata1;
++assign rkd_value = {32{(!sel_fwd_2[1] & sel_fwd_2[0])}} & fwddata_EXE |
++                   {32{(sel_fwd_2[1] & !sel_fwd_2[0])}} & fwddata_MEM |
++                   {32{(sel_fwd_2[1] & sel_fwd_2[0])}} & fwddata_WB |
++                   {32{(!sel_fwd_2[1] & !sel_fwd_2[0])}} & rf_rdata2;
+ 
+ assign rj_eq_rd = (rj_value == rkd_value);
+ assign br_taken = (   inst_beq  &&  rj_eq_rd
+-- 
+2.37.3.windows.1
+

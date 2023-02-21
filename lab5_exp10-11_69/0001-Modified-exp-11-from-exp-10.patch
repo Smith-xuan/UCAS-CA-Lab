@@ -1,0 +1,594 @@
+From a705142f01dbba57a4f2c4e75a4676fda1ea8427 Mon Sep 17 00:00:00 2001
+From: Smith-xuan <731792865@qq.com>
+Date: Sun, 9 Oct 2022 09:41:48 +0800
+Subject: [PATCH] Modified exp-11 from exp-10
+
+---
+ EX_stage.v  | 125 ++++++++++++++++++++++++++++++++++-----------------
+ ID_stage.v  | 127 +++++++++++++++++++++++++++++++++++++++-------------
+ IF_stage.v  |   4 +-
+ MEM_stage.v |  46 ++++++++++++++++---
+ WB_stage.v  |   3 +-
+ mycpu.vh    |   4 +-
+ 6 files changed, 228 insertions(+), 81 deletions(-)
+
+diff --git a/EX_stage.v b/EX_stage.v
+index de1f6bc..0e61268 100644
+--- a/EX_stage.v
++++ b/EX_stage.v
+@@ -28,12 +28,12 @@ module EX_stage(
+     output wire                        es_allowin    ,
+     //from ds
+     input  wire                        ds_to_es_valid,
+-    input  wire[`DS_TO_ES_DATA_WD -1:0] ds_to_es_data  ,
++    input  wire[`DS_TO_ES_DATA_WD -1:0] ds_to_es_data,
+     //to ms
+     output wire                        es_to_ms_valid,
+-    output wire[`ES_TO_MS_DATA_WD -1:0] es_to_ms_data  ,
++    output wire[`ES_TO_MS_DATA_WD -1:0] es_to_ms_data,
+     // data sram interface
+-    output wire [ 3:0] data_sram_we  ,
++    output wire [ 3:0] data_sram_we   ,
+     output wire [31:0] data_sram_addr ,
+     output wire [31:0] data_sram_wdata,
+ 
+@@ -56,23 +56,40 @@ wire        es_mem_we     ;
+ wire [ 4:0] es_dest       ;
+ wire [31:0] es_imm        ;
+ wire [31:0] es_rj_value   ;
+-wire [31:0] es_rkd_value   ;
++wire [31:0] es_rkd_value  ;
+ wire [31:0] es_pc         ;
+-wire  es_inst_mul_w;
+-wire     es_inst_mulh_w;
+-wire     es_inst_mulh_wu;
+-wire     es_inst_div_w;
+-wire     es_inst_mod_w;
+-wire    es_inst_div_wu;
+-wire    es_inst_mod_wu;
++wire        es_inst_mul_w ;
++wire        es_inst_mulh_w;
++wire        es_inst_mulh_wu;
++wire        es_inst_div_w ;
++wire        es_inst_mod_w ;
++wire        es_inst_div_wu;
++wire        es_inst_mod_wu;
++wire        es_inst_st_b  ;
++wire        es_inst_st_h  ;
++wire        es_inst_st_w  ;
++wire        es_inst_ld_b  ;
++wire        es_inst_ld_bu ;
++wire        es_inst_ld_h  ;
++wire        es_inst_ld_hu ;
++wire        es_inst_ld_w  ;
++
+ assign {
+-     es_inst_mul_w,
+-     es_inst_mulh_w,
+-     es_inst_mulh_wu,
+-     es_inst_div_w,
+-     es_inst_mod_w,
+-    es_inst_div_wu,
+-    es_inst_mod_wu,
++    es_inst_mul_w  ,
++    es_inst_mulh_w ,
++    es_inst_mulh_wu,
++    es_inst_div_w  ,
++    es_inst_mod_w  ,
++    es_inst_div_wu ,
++    es_inst_mod_wu ,
++    es_inst_st_b   ,
++    es_inst_st_h   ,
++    es_inst_st_w   ,
++    es_inst_ld_b   ,
++    es_inst_ld_bu  ,
++    es_inst_ld_h   ,
++    es_inst_ld_hu  ,
++    es_inst_ld_w   ,
+     es_alu_op      ,  
+     es_load_op     ,  
+     es_src1_is_pc  ,  
+@@ -82,19 +99,24 @@ assign {
+     es_dest        ,  
+     es_imm         ,  
+     es_rj_value    ,  
+-    es_rkd_value    ,  
++    es_rkd_value   ,  
+     es_pc             
+ } = ds_to_es_data_r;
+ 
+ wire [31:0] es_alu_src1   ;
+ wire [31:0] es_alu_src2   ;
+ wire [31:0] es_alu_result ;
+-wire [31:0] es_exe_result;
++wire [31:0] es_exe_result ;
+ 
+ wire    es_res_from_mem;
+ 
+ assign es_res_from_mem  = es_load_op;
+ assign es_to_ms_data = {
++    es_inst_ld_b    ,
++    es_inst_ld_bu   ,
++    es_inst_ld_h    ,
++    es_inst_ld_hu   ,
++    es_inst_ld_w    ,
+     es_res_from_mem ,  //70:70
+     es_gr_we        ,  //69:69
+     es_dest         ,  //68:64
+@@ -103,8 +125,8 @@ assign es_to_ms_data = {
+ };
+ 
+ wire [ 3:0] es_fwd_valid;
+-wire [ 4:0] es_rf_dest;
+-wire [31:0] es_rf_data;
++wire [ 4:0] es_rf_dest  ;
++wire [31:0] es_rf_data  ;
+ wire        es_blk_valid;
+ 
+ assign es_fwd_blk_data = {
+@@ -114,9 +136,9 @@ assign es_fwd_blk_data = {
+     es_blk_valid    // 0:0
+ };
+ 
+-assign es_alu_src1 =  es_src1_is_pc  ? es_pc :
++assign es_alu_src1 = es_src1_is_pc  ? es_pc  :
+                                       es_rj_value;
+-assign es_alu_src2 = es_src2_is_imm  ? es_imm : 
++assign es_alu_src2 = es_src2_is_imm ? es_imm : 
+                                       es_rkd_value;
+ alu u_alu(
+     .alu_op     (es_alu_op    ),
+@@ -135,10 +157,34 @@ assign mul_src2 = es_rkd_value;
+ assign unsigned_mul_res = mul_src1 * mul_src2;
+ assign signed_mul_res   = $signed(mul_src1) * $signed(mul_src2);
+ 
++// store
++wire [1:0] st_addr;
++wire [3:0] st_op;
++wire [3:0] st_b_op;
++wire [3:0] st_h_op;
++wire [3:0] st_w_op;
++wire [31:0] st_data;
++
++assign st_addr = es_alu_result[1:0];
++assign st_b_op = {4{(!st_addr[0] & !st_addr[1])}} & 4'b0001 |
++                 {4{( st_addr[0] & !st_addr[1])}} & 4'b0010 |
++                 {4{(!st_addr[0] &  st_addr[1])}} & 4'b0100 |
++                 {4{( st_addr[0] &  st_addr[1])}} & 4'b1000 ;
++assign st_h_op = (!st_addr[0] & !st_addr[1]) ? 4'b0011 : 4'b1100;
++assign st_w_op = 4'b1111;
++
++assign st_op   = {4{es_inst_st_b}} & st_b_op |
++                 {4{es_inst_st_h}} & st_h_op |
++                 {4{es_inst_st_w}} & st_w_op ;
++
++assign st_data = es_inst_st_b ? {4{es_rkd_value[7:0]}} :
++                 es_inst_st_h ? {2{es_rkd_value[15:0]}}:
++                                    es_rkd_value[31:0] ;
++
+ 
+-assign data_sram_we   =  es_valid ? {4{es_mem_we}}  : 4'h0;
++assign data_sram_we    = (es_valid & es_mem_we) ? st_op : 4'h0;
+ assign data_sram_addr  = es_alu_result;
+-assign data_sram_wdata = es_rkd_value;
++assign data_sram_wdata = st_data;
+ 
+ // Block & Forward
+ assign es_fwd_valid = {4{ es_valid && es_gr_we && !es_res_from_mem  }};
+@@ -151,16 +197,16 @@ wire  es_res_from_div;
+ wire[31:0]  reg_mul_rdata;
+ wire[31:0]  reg_div_rdata;
+ wire[31:0]  reg_mod_rdata;
+-assign reg_mul_rdata = es_inst_mul_w ? signed_mul_res[31:0]  :
+-                       es_inst_mulh_w? signed_mul_res[63:32]  :
+-                       /*es_inst_mulh_wu*/  unsigned_mul_res[63:32];
+-assign reg_div_rdata =  es_inst_div_w ?  signed_divider_res[63:32] :
+-                                         unsigned_divider_res[63:32];
+-assign reg_mod_rdata = es_inst_mod_w ?   signed_divider_res[31:0]: 
+-                                         unsigned_divider_res[31:0];
++assign reg_mul_rdata = es_inst_mul_w ? signed_mul_res[31:0] :
++                       es_inst_mulh_w? signed_mul_res[63:32]:
++                    /*es_inst_mulh_wu*/ unsigned_mul_res[63:32];
++assign reg_div_rdata = es_inst_div_w ? signed_divider_res[63:32]:
++                                        unsigned_divider_res[63:32];
++assign reg_mod_rdata = es_inst_mod_w ? signed_divider_res[31:0]: 
++                                        unsigned_divider_res[31:0];
+ assign es_res_from_mul = es_inst_mul_w | es_inst_mulh_w | es_inst_mulh_wu ;
+ assign es_res_from_mod = es_inst_mod_w | es_inst_mod_wu;
+-assign es_res_from_div =es_inst_div_w | es_inst_div_wu;
++assign es_res_from_div = es_inst_div_w | es_inst_div_wu;
+ 
+ assign es_exe_result = 
+     es_res_from_mul  ? reg_mul_rdata  :
+@@ -171,8 +217,8 @@ assign es_exe_result =
+ assign es_blk_valid = es_valid && es_res_from_mem ;
+ 
+ assign es_ready_go    = 
+-    (es_inst_div_w|es_inst_mod_w)     ? signed_dout_tvalid  :
+-    (es_inst_div_wu|es_inst_mod_wu)    ? unsigned_dout_tvalid :
++    (es_inst_div_w|es_inst_mod_w)     ? signed_dout_tvalid   :
++    (es_inst_div_wu|es_inst_mod_wu)   ? unsigned_dout_tvalid :
+     1'b1;
+ assign es_allowin     = !es_valid || es_ready_go && ms_allowin;
+ assign es_to_ms_valid =  es_valid && es_ready_go;
+@@ -227,7 +273,7 @@ reg  unsigned_dividend_sent;
+ reg  unsigned_divisor_sent;
+ 
+ assign unsigned_dividend_tvalid = es_valid && (es_inst_div_wu | es_inst_mod_wu) && !unsigned_dividend_sent;
+-assign unsigned_divisor_tvalid = es_valid &&( es_inst_div_wu | es_inst_mod_wu) && !unsigned_divisor_sent;
++assign unsigned_divisor_tvalid  = es_valid && (es_inst_div_wu | es_inst_mod_wu) && !unsigned_divisor_sent;
+ 
+ always @ (posedge clk) begin
+     if (reset) begin
+@@ -249,10 +295,9 @@ end
+ 
+ reg  signed_dividend_sent;
+ reg  signed_divisor_sent;
+-reg  signed_divider_done;
+ 
+ assign signed_dividend_tvalid = es_valid && (es_inst_div_w | es_inst_mod_w) && !signed_dividend_sent;
+-assign signed_divisor_tvalid = es_valid && (es_inst_div_w| es_inst_mod_w) && !signed_divisor_sent;
++assign signed_divisor_tvalid  = es_valid && (es_inst_div_w | es_inst_mod_w) && !signed_divisor_sent;
+ 
+ always @ (posedge clk) begin
+     if (reset) begin
+@@ -286,4 +331,4 @@ always @(posedge clk) begin
+         ds_to_es_data_r <= ds_to_es_data;
+     end
+ end
+-endmodule
++endmodule
+\ No newline at end of file
+diff --git a/ID_stage.v b/ID_stage.v
+index 80b8aa2..f44ee98 100644
+--- a/ID_stage.v
++++ b/ID_stage.v
+@@ -61,7 +61,7 @@ wire [31:0] rf_rdata1;
+ wire [ 4:0] rf_raddr2;
+ wire [31:0] rf_rdata2;
+ assign {
+-    rf_we   ,  //40:37
++    rf_we   ,  //40:37          ?
+     rf_waddr,  //36:32
+     rf_wdata   //31:0
+ } = ws_to_rf_data;
+@@ -75,7 +75,7 @@ wire [31:0] es_rf_data;
+ wire        es_blk_valid;
+ wire        es_res_from_mem;
+ assign {
+-    es_fwd_valid,   // 41:38
++    es_fwd_valid,   // 41:38    ?
+     es_rf_dest,     // 37:33
+     es_rf_data,     // 32:1
+     es_blk_valid    // 0:0
+@@ -145,13 +145,23 @@ wire        inst_slli_w;
+ wire        inst_srli_w;
+ wire        inst_srai_w;
+ wire        inst_addi_w;
++wire        inst_ld_b;
++wire        inst_ld_h;
++wire        inst_ld_bu;
++wire        inst_ld_hu;
+ wire        inst_ld_w;
++wire        inst_st_b;
++wire        inst_st_h;
+ wire        inst_st_w;
+ wire        inst_jirl;
+ wire        inst_b;
+ wire        inst_bl;
+ wire        inst_beq;
+ wire        inst_bne;
++wire        inst_blt;
++wire        inst_bge;
++wire        inst_bltu;
++wire        inst_bgeu;
+ wire        inst_lu12i_w;
+ wire        inst_mul_w;
+ wire        inst_mulh_w;
+@@ -161,6 +171,7 @@ wire        inst_mod_w;
+ wire        inst_div_wu;
+ wire        inst_mod_wu;
+ 
++
+ wire        need_ui5;
+ wire        need_si12;
+ wire        need_si16;
+@@ -170,7 +181,6 @@ wire        src2_is_4;
+ wire        src_reg_is_rd;
+ wire        dst_is_r1;
+ wire        rj_eq_rd;
+-wire        load_op;
+ assign op_31_26  = ds_inst[31:26];
+ assign op_25_22  = ds_inst[25:22];
+ assign op_21_20  = ds_inst[21:20];
+@@ -223,17 +233,31 @@ assign inst_andi   = op_31_26_d[6'h00] & op_25_22_d[4'hd];
+ assign inst_ori    = op_31_26_d[6'h00] & op_25_22_d[4'he];
+ assign inst_xori   = op_31_26_d[6'h00] & op_25_22_d[4'hf];
+ 
++assign inst_ld_b   = op_31_26_d[6'h0a] & op_25_22_d[4'h0];
++assign inst_ld_h   = op_31_26_d[6'h0a] & op_25_22_d[4'h1];
++assign inst_ld_bu  = op_31_26_d[6'h0a] & op_25_22_d[4'h8];
++assign inst_ld_hu  = op_31_26_d[6'h0a] & op_25_22_d[4'h9];
+ assign inst_ld_w   = op_31_26_d[6'h0a] & op_25_22_d[4'h2];
++assign inst_st_b   = op_31_26_d[6'h0a] & op_25_22_d[4'h4];
++assign inst_st_h   = op_31_26_d[6'h0a] & op_25_22_d[4'h5];
+ assign inst_st_w   = op_31_26_d[6'h0a] & op_25_22_d[4'h6];
++
+ assign inst_jirl   = op_31_26_d[6'h13];
+ assign inst_b      = op_31_26_d[6'h14];
+ assign inst_bl     = op_31_26_d[6'h15];
+ assign inst_beq    = op_31_26_d[6'h16];
+ assign inst_bne    = op_31_26_d[6'h17];
++assign inst_blt    = op_31_26_d[6'h18];
++assign inst_bge    = op_31_26_d[6'h19];
++assign inst_bltu   = op_31_26_d[6'h1a];
++assign inst_bgeu   = op_31_26_d[6'h1b];
++
+ assign inst_lu12i_w= op_31_26_d[6'h05] & ~ds_inst[25];
+ assign inst_pcaddu12i= op_31_26_d[6'h07] & ~ds_inst[25];
+ 
+ assign alu_op[ 0] = inst_add_w | inst_addi_w | inst_ld_w | inst_st_w
++                    | inst_ld_b | inst_ld_h | inst_ld_bu | inst_ld_hu
++                    | inst_st_b | inst_st_h
+                     | inst_jirl | inst_bl | inst_pcaddu12i;
+ assign alu_op[ 1] = inst_sub_w;
+ assign alu_op[ 2] = inst_slt | inst_slti;
+@@ -248,7 +272,9 @@ assign alu_op[10] = inst_srai_w | inst_sra_w;
+ assign alu_op[11] = inst_lu12i_w;
+ 
+ assign need_ui5   =  inst_slli_w | inst_srli_w | inst_srai_w;
+-assign need_si12  =  inst_addi_w | inst_ld_w | inst_st_w | inst_slti |inst_sltui;
++assign need_si12  =  inst_addi_w | inst_ld_w | inst_st_w | inst_ld_b 
++                    | inst_ld_h | inst_ld_bu | inst_ld_hu | inst_st_b 
++                    | inst_st_h | inst_slti |inst_sltui;
+ assign need_ui12  =  inst_andi | inst_ori | inst_xori;
+ assign need_si16  =  inst_jirl | inst_beq | inst_bne;
+ assign need_si20  =  inst_lu12i_w | inst_pcaddu12i;
+@@ -265,36 +291,45 @@ assign br_offs = need_si26 ? {{ 4{i26[25]}}, i26[25:0], 2'b0} :
+ 
+ assign jirl_offs = {{14{i16[15]}}, i16[15:0], 2'b0};
+ 
+-assign src_reg_is_rd = inst_beq | inst_bne | inst_st_w;
++assign src_reg_is_rd = inst_beq | inst_bne | inst_st_w | inst_st_b | inst_st_h | inst_blt | inst_bltu | inst_bge | inst_bgeu;
+ 
+ assign src1_is_pc    = inst_jirl | inst_bl | inst_pcaddu12i;
+ 
+-assign src2_is_imm   = inst_slli_w | inst_slti |
+-                       inst_srli_w | inst_sltui |
+-                       inst_srai_w | inst_andi  |
+-                       inst_addi_w | inst_ori  |
+-                       inst_ld_w   | inst_xori |
+-                       inst_st_w   | inst_pcaddu12i |
++assign src2_is_imm   = inst_slli_w | inst_slti | inst_st_b | 
++                       inst_srli_w | inst_sltui | inst_ld_hu |
++                       inst_srai_w | inst_andi  | inst_ld_h |
++                       inst_addi_w | inst_ori  | inst_ld_bu |
++                       inst_ld_w   | inst_xori | inst_ld_b |
++                       inst_st_w   | inst_pcaddu12i | inst_st_h |
+                        inst_lu12i_w|
+                        inst_jirl   |
+                        inst_bl     ;
+-assign load_op       = inst_ld_w;
+-assign res_from_mem  = inst_ld_w;
++assign load_op       = inst_ld_w | inst_ld_b | inst_ld_bu | inst_ld_hu | inst_ld_h;
++assign res_from_mem  = load_op;
+ assign dst_is_r1     = inst_bl;
+-assign gr_we         = ~inst_st_w & ~inst_beq & ~inst_bne & ~inst_b;
+-assign mem_we        = inst_st_w;
++assign gr_we         = ~inst_st_w & ~inst_beq & ~inst_bne & ~inst_b & ~inst_blt &
++                        ~inst_st_b & ~inst_st_h & ~inst_bltu & ~inst_bge & ~inst_bgeu;
++assign mem_we        = inst_st_w | inst_st_b | inst_st_h;
+ assign dest          = dst_is_r1 ? 5'd1 : rd;
+ 
+ assign blk_valid     =  !ds_ready_go;
+-assign br_blk_data       = { blk_valid,br_taken,br_target};
++assign br_blk_data   = { blk_valid,br_taken,br_target};
+ assign ds_to_es_data = {
+-     inst_mul_w,
+-     inst_mulh_w,
+-     inst_mulh_wu,
+-     inst_div_w,
+-     inst_mod_w,
+-     inst_div_wu,
+-     inst_mod_wu,
++    inst_mul_w  ,     
++    inst_mulh_w ,
++    inst_mulh_wu,
++    inst_div_w  ,
++    inst_mod_w  ,
++    inst_div_wu ,
++    inst_mod_wu ,
++    inst_st_b   ,
++    inst_st_h   ,
++    inst_st_w   ,
++    inst_ld_b   ,
++    inst_ld_bu  ,
++    inst_ld_h   ,
++    inst_ld_hu  ,
++    inst_ld_w   ,
+     alu_op      ,  
+     load_op     ,  //137
+     src1_is_pc  ,  //136
+@@ -304,7 +339,7 @@ assign ds_to_es_data = {
+     dest        ,  //132:128
+     imm         ,  //127:96
+     rj_value    ,  //95 :64
+-    rkd_value    ,  //63 :32
++    rkd_value   ,  //63 :32
+     ds_pc          //31 :0
+ };
+ 
+@@ -335,13 +370,43 @@ assign rkd_value =
+     rf_rdata2;
+     
+ assign rj_eq_rd = (rj_value == rkd_value);
+-assign br_taken = (   inst_beq  &&  rj_eq_rd
+-                   || inst_bne  && !rj_eq_rd
+-                   || inst_jirl
+-                   || inst_bl
+-                   || inst_b
++
++
++//assign rj_lt_rd = ($signed(rj_value) < $signed(rkd_value));
++//assign rj_ltu_rd = (rj_value < rkd_value);
++
++
++wire [32:0] sub_result;
++//wire        sub_cout;
++wire        rj_lt_rd;
++wire        rj_ltu_rd;
++
++assign sub_result = {1'b0, rj_value} + {1'b0, ~rkd_value} + 1'b1;
++
++
++// SLT result
++assign rj_lt_rd = (rj_value[31] & ~rkd_value[31])
++                        | ((rj_value[31] ~^ rkd_value[31]) & sub_result[31]);
++
++// SLTU result
++assign rj_ltu_rd = ~sub_result[32];
++
++
++
++
++
++
++assign br_taken = (  (inst_beq  &  rj_eq_rd)
++                   | (inst_bne  & !rj_eq_rd)
++                   | inst_jirl
++                   | inst_bl
++                   | inst_b
++                   | (inst_blt & rj_lt_rd)
++                   | (inst_bltu & rj_ltu_rd)
++                   | (inst_bge & !rj_lt_rd)
++                   | (inst_bgeu & !rj_ltu_rd)
+                   )&&ds_valid;
+-assign br_target = (inst_beq || inst_bne || inst_bl || inst_b) ? (ds_pc + br_offs) :
++assign br_target = (inst_beq || inst_bne || inst_bl || inst_b || inst_bge || inst_blt || inst_bgeu || inst_bltu) ? (ds_pc + br_offs) :
+                                                    /*inst_jirl*/ (rj_value + jirl_offs);
+ assign ds_ready_go    = !(
+     es_blk_valid  && (es_rf_dest == rf_raddr1 || es_rf_dest == rf_raddr2)
+@@ -364,4 +429,4 @@ always @(posedge clk) begin
+         fs_to_ds_data_r <= fs_to_ds_data;
+     end
+ end
+-endmodule
++endmodule
+\ No newline at end of file
+diff --git a/IF_stage.v b/IF_stage.v
+index c3635d8..567571b 100644
+--- a/IF_stage.v
++++ b/IF_stage.v
+@@ -56,14 +56,14 @@ reg  [31:0] fs_pc;
+ assign fs_to_ds_data = {fs_inst ,fs_pc};
+                        
+ 
+-assign to_fs_valid      = ~reset ;
++assign to_fs_valid    = ~reset ;
+ assign fs_ready_go    = 1'b1;
+ assign fs_allowin     = !fs_valid || fs_ready_go && ds_allowin;
+ assign fs_to_ds_valid =  fs_valid && fs_ready_go;
+ 
+ assign seq_pc       = fs_pc + 3'h4;
+ assign next_pc    =  !fs_allowin ? fs_pc:
+-                    br_taken ? br_target :
++                    br_taken ? br_target:
+                                  seq_pc;
+ 
+ assign inst_sram_we    = 1'b0;
+diff --git a/MEM_stage.v b/MEM_stage.v
+index 5d29eb6..f81e4b1 100644
+--- a/MEM_stage.v
++++ b/MEM_stage.v
+@@ -46,11 +46,22 @@ wire        ms_gr_we;
+ wire [ 4:0] ms_dest;
+ wire [31:0] ms_exe_result;
+ wire [31:0] ms_pc;
++wire        ms_inst_ld_b;
++wire        ms_inst_ld_bu;
++wire        ms_inst_ld_h;
++wire        ms_inst_ld_hu;
++wire        ms_inst_ld_w;
++
+ assign {
+-    ms_res_from_mem,  //70:70
+-    ms_gr_we       ,  //69:69
+-    ms_dest        ,  //68:64
+-    ms_exe_result  ,  //63:32
++    ms_inst_ld_b    ,
++    ms_inst_ld_bu   ,
++    ms_inst_ld_h    ,
++    ms_inst_ld_hu   ,
++    ms_inst_ld_w    ,
++    ms_res_from_mem ,  //70:70
++    ms_gr_we        ,  //69:69
++    ms_dest         ,  //68:64
++    ms_exe_result   ,  //63:32
+     ms_pc             //31:0
+ } = es_to_ms_data_r;
+ 
+@@ -93,7 +104,32 @@ always @(posedge clk) begin
+     end
+ end
+ 
+-assign mem_result = data_sram_rdata;
++
++// load
++wire [1:0] ld_addr;
++wire [7:0] mem_byte;
++wire [15:0] mem_half;
++wire [31:0] mem_word;
++wire [31:0] ld_b_res;
++wire [31:0] ld_h_res;
++wire [31:0] ld_w_res;
++
++assign ld_addr = ms_exe_result[1:0];
++assign mem_byte = {8{!ld_addr[0] & !ld_addr[1]}} & data_sram_rdata[7:0]   |
++                  {8{ ld_addr[0] & !ld_addr[1]}} & data_sram_rdata[15:8]  |
++                  {8{!ld_addr[0] &  ld_addr[1]}} & data_sram_rdata[23:16] |
++                  {8{ ld_addr[0] &  ld_addr[1]}} & data_sram_rdata[31:24] ;
++assign mem_half = ld_addr[1] ? data_sram_rdata[31:16] : data_sram_rdata[15:0];
++assign mem_word = data_sram_rdata;
++assign ld_b_res[31:8] = {24{ms_inst_ld_b & mem_byte[7]}};
++assign ld_b_res[7:0]  = mem_byte;
++assign ld_h_res[31:16]= {16{ms_inst_ld_h & mem_half[15]}};
++assign ld_h_res[15:0] = mem_half;
++assign ld_w_res       = mem_word;
++
++assign mem_result = {32{ms_inst_ld_b || ms_inst_ld_bu}} & ld_b_res |
++                    {32{ms_inst_ld_h || ms_inst_ld_hu}} & ld_h_res |
++                    {32{ms_inst_ld_w}}                  & ld_w_res ;
+ 
+ assign ms_final_result = ms_res_from_mem ? mem_result: ms_exe_result;
+ 
+diff --git a/WB_stage.v b/WB_stage.v
+index 930d5ff..c64967c 100644
+--- a/WB_stage.v
++++ b/WB_stage.v
+@@ -84,7 +84,8 @@ assign rf_wdata = ws_final_result;
+ 
+ // debug info generate
+ assign debug_wb_pc       = ws_pc;
+-assign debug_wb_rf_we   = rf_we;
++assign debug_wb_rf_we    = rf_we;
+ assign debug_wb_rf_wnum  = ws_dest;
+ assign debug_wb_rf_wdata = ws_final_result;
+ endmodule
++
+diff --git a/mycpu.vh b/mycpu.vh
+index fcd727d..059094e 100644
+--- a/mycpu.vh
++++ b/mycpu.vh
+@@ -1,7 +1,7 @@
+     `define BR_DATA_WD           34
+     `define FS_TO_DS_DATA_WD     64
+-    `define DS_TO_ES_DATA_WD     157
+-    `define ES_TO_MS_DATA_WD     71
++    `define DS_TO_ES_DATA_WD     165
++    `define ES_TO_MS_DATA_WD     76
+     `define MS_TO_WS_DATA_WD     70
+     `define WS_TO_RF_DATA_WD     41
+     `define ES_FWD_BLK_DATA_WD   42
+-- 
+2.37.3.windows.1
+

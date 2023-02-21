@@ -1,0 +1,317 @@
+From 8373adeed9091b75fee8a865601a2a0e06a87fa3 Mon Sep 17 00:00:00 2001
+From: Smith-xuan <731792865@qq.com>
+Date: Mon, 12 Sep 2022 10:52:26 +0800
+Subject: [PATCH] Modify lab_7
+
+---
+ mycpu_top.v | 232 +++++++++++++++++++++++++++++++++++++++++++---------
+ 1 file changed, 195 insertions(+), 37 deletions(-)
+
+diff --git a/mycpu_top.v b/mycpu_top.v
+index 7c3c0aa..2d3a84a 100644
+--- a/mycpu_top.v
++++ b/mycpu_top.v
+@@ -2,12 +2,14 @@ module mycpu_top(
+     input  wire        clk,
+     input  wire        resetn,
+     // inst sram interface
+-    output wire        inst_sram_we,
++    output wire        inst_sram_en,
++    output wire [3:0]  inst_sram_we,
+     output wire [31:0] inst_sram_addr,
+     output wire [31:0] inst_sram_wdata,
+     input  wire [31:0] inst_sram_rdata,
+     // data sram interface
+-    output wire        data_sram_we,
++    output wire        data_sram_en,
++    output wire [3:0]  data_sram_we,
+     output wire [31:0] data_sram_addr,
+     output wire [31:0] data_sram_wdata,
+     input  wire [31:0] data_sram_rdata,
+@@ -17,9 +19,10 @@ module mycpu_top(
+     output wire [ 4:0] debug_wb_rf_wnum,
+     output wire [31:0] debug_wb_rf_wdata
+ );
+-wire         reset;
+-//always @(posedge clk) reset <= ~resetn;
+-assign reset = ~resetn;
++reg reset;
++always @(posedge clk) reset <= ~resetn;
++//wire         reset;
++//assign reset = ~resetn;
+ 
+ wire [31:0] seq_pc;
+ wire [31:0] nextpc;
+@@ -104,37 +107,188 @@ wire [31:0] alu_result ;
+ wire [31:0] mem_result;
+ wire [31:0] final_result;
+ 
++wire      validin;
++reg       valid;
++
++reg [31:0] pc_ID;
++reg        valid_ID;
++reg [31:0] inst_ID;
++
++wire       sel_rf_res = res_from_mem;
++reg [31:0] pc_EXE;
++reg        valid_EXE;
++reg        gr_we_EXE;
++reg [4:0]  dest_EXE;
++reg        sel_rf_res_EXE;
++reg [31:0] alu_src1_EXE;
++reg [31:0] alu_src2_EXE;   
++reg [11:0] alu_op_EXE;
++reg [3:0]  data_sram_we_EXE;
++reg        data_sram_en_EXE;
++reg [31:0] rkd_value_EXE;
++
++reg [31:0] pc_MEM;
++reg        valid_MEM;
++reg        gr_we_MEM;
++reg [4:0]  dest_MEM;
++reg        sel_rf_res_MEM;
++reg [31:0] alu_result_MEM;
++
++reg [31:0] pc_WB;
++reg        valid_WB;
++reg        gr_we_WB;
++reg [4:0]  dest_WB;
++reg [31:0] final_result_WB;
++
++
++wire IFreg_ready_go = 1'b1;
++wire IDreg_ready_go = 1'b1;
++wire EXEreg_ready_go = 1'b1;
++wire MEMreg_ready_go = 1'b1;
++wire WBreg_ready_go = 1'b1;
++wire IFreg_allowin;
++wire IDreg_allowin;
++wire EXEreg_allowin;
++wire MEMreg_allowin;
++wire WBreg_allowin;
++wire allowout = 1'b1;
++assign IFreg_allowin = !valid || (IFreg_ready_go && IDreg_allowin);
++assign IDreg_allowin = !valid_ID || (IDreg_ready_go && EXEreg_allowin);
++assign EXEreg_allowin = !valid_EXE || (EXEreg_ready_go && MEMreg_allowin);
++assign MEMreg_allowin = !valid_MEM || (MEMreg_ready_go && WBreg_allowin);
++assign WBreg_allowin = !valid_WB || (WBreg_ready_go && allowout);
++wire to_IF_valid;
++wire IF_to_ID_valid;
++wire ID_to_EXE_valid;
++wire EXE_to_MEM_valid;
++wire MEM_to_WB_valid;
++assign validin = ~reset;
++assign to_IF_valid = validin;
++assign IF_to_ID_valid = valid && IFreg_ready_go;
++assign ID_to_EXE_valid = valid_ID && IDreg_ready_go;
++assign EXE_to_MEM_valid = valid_EXE && EXEreg_ready_go;
++assign MEM_to_WB_valid = valid_MEM && MEMreg_ready_go;
++
+ 
+ assign seq_pc       = pc + 3'h4;
+ assign nextpc       = br_taken ? br_target : seq_pc;
+ 
++
+ always @(posedge clk) begin
+     if (reset) begin
+-        pc <= 32'h1c000000; 
++        pc <= 32'h1bfffffc;
++        valid <= 1'b0;
++    end
++    else if(IFreg_allowin)begin
++        valid <= validin;
+     end
+-    else begin
++    else if(br_taken)begin
++        valid <= 1'b0;
++    end
++
++    if(to_IF_valid && IFreg_allowin) begin
+         pc <= nextpc;
+     end
++
++end
++
++
++always @(posedge clk) begin
++    if(reset) begin
++        valid_ID <= 1'b0;
++    end
++    else if(br_taken) begin
++        valid_ID <= 1'b0;
++    end
++    else if(IDreg_allowin)begin
++        valid_ID <= IF_to_ID_valid;
++    end
++
++    if(IF_to_ID_valid && IDreg_allowin)begin
++        pc_ID <= pc;
++        inst_ID <= inst;
++    end
++
++end
++
++
++always @(posedge clk) begin
++    if(reset) begin
++        valid_EXE <= 1'b0;
++    end
++    else if (EXEreg_allowin)begin
++        valid_EXE <= ID_to_EXE_valid;
++    end
++
++    if(ID_to_EXE_valid && EXEreg_allowin)begin
++        pc_EXE <= pc_ID;
++        gr_we_EXE <= gr_we;
++        dest_EXE <= dest;
++        sel_rf_res_EXE <= sel_rf_res;
++        alu_src1_EXE <= alu_src1;
++        alu_src2_EXE <= alu_src2;
++        alu_op_EXE <= alu_op;
++        data_sram_we_EXE <= {4{mem_we}};
++        data_sram_en_EXE <= (mem_we || inst_ld_w);
++        rkd_value_EXE <= rkd_value;
++    end
++end
++
++
++always @(posedge clk) begin
++    if(reset) begin
++        valid_MEM <= 1'b0;
++    end
++    else if (MEMreg_allowin) begin
++        valid_MEM <= EXE_to_MEM_valid;
++    end
++
++    if(EXE_to_MEM_valid && MEMreg_allowin)begin
++        pc_MEM <= pc_EXE;
++        gr_we_MEM <= gr_we_EXE;
++        dest_MEM <= dest_EXE;
++        sel_rf_res_MEM <= sel_rf_res_EXE;
++        alu_result_MEM <= alu_result;
++    end
+ end
+ 
+-assign inst_sram_we    = 1'b0;
+-assign inst_sram_addr  = pc;
++
++always @(posedge clk) begin
++    if(reset) begin
++        valid_WB <= 1'b0;
++    end
++    else if (WBreg_allowin) begin
++        valid_WB <= MEM_to_WB_valid;
++    end
++
++    if(MEM_to_WB_valid && WBreg_allowin) begin
++        pc_WB <= pc_MEM;
++        gr_we_WB <= gr_we_MEM;
++        dest_WB <= dest_MEM;
++        final_result_WB <= final_result;
++    end
++end
++
++
++assign inst_sram_en    = 1'b1;
++assign inst_sram_we    = 4'b0;
++assign inst_sram_addr  = nextpc;
+ assign inst_sram_wdata = 32'b0;
+ assign inst            = inst_sram_rdata;
+ 
+-assign op_31_26  = inst[31:26];
+-assign op_25_22  = inst[25:22];
+-assign op_21_20  = inst[21:20];
+-assign op_19_15  = inst[19:15];
++assign op_31_26  = inst_ID[31:26];
++assign op_25_22  = inst_ID[25:22];
++assign op_21_20  = inst_ID[21:20];
++assign op_19_15  = inst_ID[19:15];
+ 
+-assign rd   = inst[ 4: 0];
+-assign rj   = inst[ 9: 5];
+-assign rk   = inst[14:10];
++assign rd   = inst_ID[ 4: 0];
++assign rj   = inst_ID[ 9: 5];
++assign rk   = inst_ID[14:10];
+ 
+-assign i12  = inst[21:10];
+-assign i20  = inst[24: 5];
+-assign i16  = inst[25:10];
+-assign i26  = {inst[ 9: 0], inst[25:10]};
++assign i12  = inst_ID[21:10];
++assign i20  = inst_ID[24: 5];
++assign i16  = inst_ID[25:10];
++assign i26  = {inst_ID[ 9: 0], inst_ID[25:10]};
+ 
+ decoder_6_64 u_dec0(.in(op_31_26 ), .out(op_31_26_d ));
+ decoder_4_16 u_dec1(.in(op_25_22 ), .out(op_25_22_d ));
+@@ -160,7 +314,7 @@ assign inst_b      = op_31_26_d[6'h14];
+ assign inst_bl     = op_31_26_d[6'h15];
+ assign inst_beq    = op_31_26_d[6'h16];
+ assign inst_bne    = op_31_26_d[6'h17];
+-assign inst_lu12i_w= op_31_26_d[6'h05] & ~inst[25];
++assign inst_lu12i_w= op_31_26_d[6'h05] & ~inst_ID[25];
+ 
+ assign alu_op[ 0] = inst_add_w | inst_addi_w | inst_ld_w | inst_st_w
+                     | inst_jirl | inst_bl;
+@@ -234,36 +388,40 @@ assign br_taken = (   inst_beq  &&  rj_eq_rd
+                    || inst_jirl
+                    || inst_bl
+                    || inst_b
+-                  );
+-assign br_target = (inst_beq || inst_bne || inst_bl || inst_b) ? (pc + br_offs) :
++                  ) && valid_ID;
++assign br_target = (inst_beq || inst_bne || inst_bl || inst_b) ? (pc_ID + br_offs) :
+                                                    /*inst_jirl*/ (rj_value + jirl_offs);
+ 
+-assign alu_src1 = src1_is_pc  ? pc[31:0] : rj_value;
++assign alu_src1 = src1_is_pc  ? pc_ID[31:0] : rj_value;
+ assign alu_src2 = src2_is_imm ? imm : rkd_value;
+ 
++wire [31:0] alu_src1_in = alu_src1_EXE;
++wire [31:0] alu_src2_in = alu_src2_EXE;
++wire [11:0] alu_op_in = alu_op_EXE;
++
+ alu u_alu(
+-    .alu_op     (alu_op    ),
+-    .alu_src1   (alu_src1  ),
+-    .alu_src2   (alu_src2  ),
++    .alu_op     (alu_op_in    ),
++    .alu_src1   (alu_src1_in  ),
++    .alu_src2   (alu_src2_in  ),
+     .alu_result (alu_result)
+     );
+ 
+-assign data_sram_en    = (mem_we);
+-assign data_sram_we    = mem_we;
++assign data_sram_en    = data_sram_en_EXE;
++assign data_sram_we    = data_sram_we_EXE;
+ assign data_sram_addr  = alu_result;
+-assign data_sram_wdata = rkd_value;
++assign data_sram_wdata = rkd_value_EXE;
+ 
+ assign mem_result   = data_sram_rdata;
+-assign final_result = res_from_mem ? mem_result : alu_result;
++assign final_result = sel_rf_res_MEM ? mem_result : alu_result_MEM;
+ 
+-assign rf_we    = gr_we;
+-assign rf_waddr = dest;
+-assign rf_wdata = final_result;
++assign rf_we    = (valid_WB) ? gr_we_WB : 1'b0;
++assign rf_waddr = dest_WB;
++assign rf_wdata = final_result_WB;
+ 
+ // debug info generate
+-assign debug_wb_pc[31:0]       = pc;
++assign debug_wb_pc[31:0]      = pc_WB;
+ assign debug_wb_rf_we[3:0]   = {4{rf_we}};
+-assign debug_wb_rf_wnum[4:0]  = dest;
+-assign debug_wb_rf_wdata[31:0] = final_result;
++assign debug_wb_rf_wnum[4:0]  = dest_WB;
++assign debug_wb_rf_wdata[31:0] = final_result_WB;
+ 
+ endmodule
+-- 
+2.37.3.windows.1
+

@@ -1,0 +1,51 @@
+--- D:\国科大通知\体系结构实验\lab8_exp19_69\myCPU1\ID_stage.v
++++ D:\国科大通知\体系结构实验\lab8_exp19_69\myCPU\ID_stage.v
+@@ -50,6 +50,9 @@
+     input wire [`ES_CSR_BLK_DATA_WD -1:0] es_csr_blk_data,
+     input wire [`MS_CSR_BLK_DATA_WD -1:0] ms_csr_blk_data,
+     input wire [`WS_CSR_BLK_DATA_WD -1:0] ws_csr_blk_data,
++    input wire                            es_tlbsrch_blk,
++    input wire                            ms_tlbsrch_blk,
++    input wire                            ws_tlbsrch_blk,
+ 
+     //tlb_reflush
+     output wire                        tlb_reflush
+@@ -63,7 +66,9 @@
+ wire        ds_ex_adef;
+ wire        ds_ex_ine;
+ wire        ds_fake_ex_reflush;
+-assign {
++wire [5:0]  ds_tlb_ex_bus;
++assign {
++    ds_tlb_ex_bus,
+     ds_inst,
+     ds_pc,
+     ds_ex_adef,
+@@ -399,7 +404,7 @@
+ assign gr_we         = ~inst_st_w & ~inst_beq & ~inst_bne & ~inst_b & ~inst_blt &
+                         ~inst_st_b & ~inst_st_h & ~inst_bltu & ~inst_bge & ~inst_bgeu &
+                         ~inst_ertn & ~inst_syscall & ~inst_break & ~inst_tlbsrch & ~inst_tlbrd &
+-                        ~inst_tlbwr & ~inst_tlbfill &~inst_invtlb;
++                        ~inst_tlbwr & ~inst_tlbfill & ~inst_invtlb;
+ assign mem_we        = inst_st_w | inst_st_b | inst_st_h;
+ assign dest          = dst_is_r1 ? 5'd1 : (inst_rdcntid ? rj : rd);
+ assign csr_we        = inst_csrwr | inst_csrxchg;
+@@ -410,6 +415,7 @@
+ assign blk_valid     =  !ds_ready_go;
+ assign br_blk_data   = { blk_valid,br_taken,br_target};
+ assign ds_to_es_data = {
++    ds_tlb_ex_bus,//+6
+     ds_fake_ex_reflush, //+1
+     tlb_bus     , //+5
+     op          , //+5
+@@ -542,7 +548,8 @@
+     ms_blk_valid  && !wb_ertn_flush && !wb_ex && (ms_rf_dest == rf_raddr1 || ms_rf_dest == rf_raddr2) ||
+     es_csr_blk_valid && !wb_ertn_flush && !wb_ex && (es_rf_dest == rf_raddr1 || es_rf_dest == rf_raddr2) ||
+     ms_csr_blk_valid && !wb_ertn_flush && !wb_ex && (ms_rf_dest == rf_raddr1 || ms_rf_dest == rf_raddr2) ||
+-    ws_csr_blk_valid && !wb_ertn_flush && !wb_ex && (rf_waddr == rf_raddr1 || rf_waddr == rf_raddr2));
++    ws_csr_blk_valid && !wb_ertn_flush && !wb_ex && (rf_waddr == rf_raddr1 || rf_waddr == rf_raddr2) ||
++    inst_tlbsrch && !wb_ertn_flush && !wb_ex && (es_tlbsrch_blk | ms_tlbsrch_blk | ws_tlbsrch_blk));
+ //assign ds_ready_go    = 1'b1;
+ assign ds_allowin     = (!ds_valid || ds_ready_go && es_allowin);
+ assign ds_to_es_valid = ds_valid && ds_ready_go && !wb_ex && !wb_ertn_flush;
+

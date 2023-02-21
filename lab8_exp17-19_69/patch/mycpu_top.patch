@@ -1,0 +1,100 @@
+--- D:\国科大通知\体系结构实验\lab8_exp19_69\myCPU1\mycpu_top.v
++++ D:\国科大通知\体系结构实验\lab8_exp19_69\myCPU\mycpu_top.v
+@@ -102,6 +102,9 @@
+ wire [`ES_CSR_BLK_DATA_WD -1:0] es_csr_blk_data;
+ wire [`MS_CSR_BLK_DATA_WD -1:0] ms_csr_blk_data;
+ wire [`WS_CSR_BLK_DATA_WD -1:0] ws_csr_blk_data;
++wire es_tlbsrch_blk;
++wire ms_tlbsrch_blk;
++wire ws_tlbsrch_blk;
+ 
+ assign debug_wb_pc = wb_pc;
+ 
+@@ -288,6 +291,9 @@
+     .es_csr_blk_data (es_csr_blk_data),
+     .ms_csr_blk_data (ms_csr_blk_data),
+     .ws_csr_blk_data (ws_csr_blk_data),
++    .es_tlbsrch_blk  (es_tlbsrch_blk ),
++    .ms_tlbsrch_blk  (ms_tlbsrch_blk ),
++    .ws_tlbsrch_blk  (ws_tlbsrch_blk ),
+     //tlb_reflush
+     .tlb_reflush     (tlb_reflush)
+ );
+@@ -323,6 +329,7 @@
+     .ms_ex           (ms_ex         ),
+     .ms_ertn_flush   (ms_ertn       ),
+     .es_csr_blk_data (es_csr_blk_data),
++    .es_tlbsrch_blk  (es_tlbsrch_blk ),
+ 
+     //tlb
+     // search port 1
+@@ -373,7 +380,8 @@
+     .wb_ertn_flush   (wb_ertn_flush ),
+     .ms_ex_valid     (ms_ex         ),
+     .ms_ertn_valid   (ms_ertn       ),
+-    .ms_csr_blk_data (ms_csr_blk_data)
++    .ms_csr_blk_data (ms_csr_blk_data),
++    .ms_tlbsrch_blk  (ms_tlbsrch_blk )
+ );
+ // WB stage
+ WB_stage wb_stage(
+@@ -395,6 +403,7 @@
+     .ws_ex_valid     (wb_ex         ),
+     .ws_ertn_flush_valid (wb_ertn_flush),
+     .ws_csr_blk_data (ws_csr_blk_data),
++    .ws_tlbsrch_blk  (ws_tlbsrch_blk ),
+     .wb_ecode        (wb_ecode      ),
+     .wb_esubcode     (wb_esubcode   ),
+     .wb_vaddr        (wb_vaddr      ),
+@@ -506,7 +515,7 @@
+     .s0_vppn       (s0_vppn        ),
+     .s0_va_bit12   (s0_va_bit12    ),
+     .s0_asid       (s0_asid        ),
+-    .s0_found      (s0_fount       ),
++    .s0_found      (s0_found       ),
+     .s0_index      (s0_index       ),
+     .s0_ppn        (s0_ppn         ),  
+     .s0_ps         (s0_ps          ),
+@@ -639,6 +648,7 @@
+     input  [ 2:0] inst_op,//{load.store,if}
+     output [31:0] pa,
+     output [ 5:0] tlb_ex_bus,//{PME,PPE,PIS,PIL,PIF,TLBR}
++    output wire adem_judge,
+     //tlb
+     output [18:0] s_vppn,
+     output        s_va_bit12,
+@@ -661,8 +671,8 @@
+     
+ );
+     parameter ps4k = 12;
++    wire mapping;
+     wire direct;
+-    wire mapping;
+     //direct
+     wire dmw_hit0;
+     wire dmw_hit1;
+@@ -681,16 +691,17 @@
+      assign s_vppn =  va[31:13];
+      assign s_va_bit12 = va[12];
+      assign s_asid =  csr_asid[9:0];
+-     assign tlb_ex_bus = {direct?1'b0:~dmw_hit &inst_op[1]&~s_d,
+-                          direct?1'b0:~dmw_hit &csr_crmd[1:0]>s_plv,
+-                          direct?1'b0:~dmw_hit &inst_op[1]&~s_v,
+-                          direct?1'b0:~dmw_hit &inst_op[2]&~s_v,
+-                          direct?1'b0:~dmw_hit &inst_op[0]&~s_v,
+-                          direct?1'b0:~dmw_hit &~s_found
++     assign tlb_ex_bus = {direct ? 1'b0 : ~dmw_hit & inst_op[1] & s_found & s_v & csr_crmd[1:0] <= s_plv & ~s_d,//PME
++                          direct ? 1'b0 : ~dmw_hit & {|inst_op} & s_found & s_v & csr_crmd[1:0] > s_plv,//PPE
++                          direct ? 1'b0 : ~dmw_hit & inst_op[1] & s_found & ~s_v,//PIS
++                          direct ? 1'b0 : ~dmw_hit & inst_op[2] & s_found & ~s_v,//PIL
++                          direct ? 1'b0 : ~dmw_hit & inst_op[0] & s_found & ~s_v,//PIF
++                          direct ? 1'b0 : ~dmw_hit & {|inst_op} & ~s_found//TLBR
+                           };
+      assign tlb_pa4k = {s_ppn[19:0],va[11:0]};
+      assign tlb_pa4m = {s_ppn[19:10],va[21:0]};
+      assign tlb_pa = (s_ps==ps4k)? tlb_pa4k:tlb_pa4m;
+      assign dmw_hit = dmw_hit0 | dmw_hit1;
+      assign pa = direct ? va:(dmw_hit0 ? dmw_pa0 : (dmw_hit1 ? dmw_pa1 : tlb_pa));
++     assign adem_judge = direct | dmw_hit;
+ endmodule
+

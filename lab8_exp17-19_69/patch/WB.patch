@@ -1,0 +1,77 @@
+--- D:\国科大通知\体系结构实验\lab8_exp19_69\myCPU1\WB_stage.v
++++ D:\国科大通知\体系结构实验\lab8_exp19_69\myCPU\WB_stage.v
+@@ -42,6 +42,7 @@
+     output wire                            ws_ex_valid      ,
+     output wire                            ws_ertn_flush_valid,
+     output wire [`WS_CSR_BLK_DATA_WD -1:0] ws_csr_blk_data  ,
++    output wire                            ws_tlbsrch_blk   ,
+     output wire [5                     :0] wb_ecode         ,
+     output wire [8                     :0] wb_esubcode      ,
+     output wire [31                    :0] wb_vaddr         ,
+@@ -122,9 +123,11 @@
+ wire        ws_ex_syscall;
+ wire        ws_ex_break;
+ wire        ws_ex_adef;
++wire        ws_ex_adem;
+ wire        ws_ex_ale;
+ wire        ws_ex_ine;
+ wire        ws_has_int;
++wire [5:0]  ws_tlb_es_bus;
+ wire        ws_inst_rdcntid;
+ wire        ws_inst_rdcntvl_w;
+ wire        ws_inst_rdcntvh_w;
+@@ -136,6 +139,8 @@
+ wire        ws_fake_ex_reflush;
+ 
+ assign {
++    ws_ex_adem,
++    ws_tlb_es_bus,
+     ws_fake_ex_reflush,//+1
+     tlb_bus,//+5
+     ws_inst_csrxchg,
+@@ -175,23 +180,31 @@
+ assign wb_vaddr = ws_vaddr;
+ assign ws_ready_go = 1'b1;
+ assign ws_allowin  = !ws_valid || ws_ready_go;
+-assign ws_csr_we_valid = ws_csr_we && ws_valid;
+-assign ws_ex_valid = (ws_ex_syscall | ws_ex_adef | ws_ex_ale | ws_ex_break | ws_has_int | ws_ex_ine | ws_fake_ex_reflush) && ws_valid;
++assign ws_csr_we_valid = ws_csr_we && ws_valid && !wb_ex_r;
++assign ws_ex_valid = (ws_ex_syscall | ws_ex_adef |ws_ex_adem | ws_ex_ale | ws_ex_break | ws_has_int | ws_ex_ine | ws_fake_ex_reflush | (|ws_tlb_es_bus)) && ws_valid;
+ assign ws_ertn_flush_valid = ws_ertn_flush && ws_valid;
+ assign ws_csr_blk_valid = (ws_inst_csr | ws_inst_rdcntid | ws_inst_rdcntvl_w | ws_inst_rdcntvh_w) && ws_valid;
+ assign ws_csr_num_o = ws_csr_num;
+ assign ws_csr_blk_data = {ws_csr_blk_valid, ws_csr_num_o};
+-
+-assign wb_ex_r = (ws_ex_syscall | ws_ex_adef | ws_ex_ale | ws_ex_break | ws_has_int | ws_ex_ine) && ws_valid;
+-
+-assign wb_ecode = {6{ws_ex_adef}} & 6'b001000    |
+-                  {6{ws_ex_ale}} & 6'b001001     |
+-                  {6{ws_ex_syscall}} & 6'b001011 |
+-                  {6{ws_ex_break}} & 6'b001100   |
+-                  {6{ws_ex_ine}} & 6'b001101     |
+-                  {6{ws_has_int}} & 6'b000000    ;
+-
+-assign wb_esubcode = 9'b0;
++assign ws_tlbsrch_blk = ((ws_inst_csrwr || ws_inst_csrxchg) && (ws_csr_num == `CSR_ASID || ws_csr_num == `CSR_TLBEHI) || tlb_bus[3]) && ws_valid;
++
++assign wb_ex_r = (ws_ex_syscall | ws_ex_adef | ws_ex_adem | ws_ex_ale | ws_ex_break | ws_has_int | ws_ex_ine | (|ws_tlb_es_bus)) && ws_valid;
++
++assign wb_ecode = {6{ws_ex_adef}}       & 6'b001000 |
++                  {6{ws_ex_adem}}       & 6'b001000 |
++                  {6{ws_ex_ale}}        & 6'b001001 |
++                  {6{ws_ex_syscall}}    & 6'b001011 |
++                  {6{ws_ex_break}}      & 6'b001100 |
++                  {6{ws_ex_ine}}        & 6'b001101 |
++                  {6{ws_has_int}}       & 6'b000000 |
++                  {6{ws_tlb_es_bus[0]}} & 6'b111111 |
++                  {6{ws_tlb_es_bus[1]}} & 6'b000011 |
++                  {6{ws_tlb_es_bus[2]}} & 6'b000001 |
++                  {6{ws_tlb_es_bus[3]}} & 6'b000010 |
++                  {6{ws_tlb_es_bus[4]}} & 6'b000111 |
++                  {6{ws_tlb_es_bus[5]}} & 6'b000100;
++
++assign wb_esubcode = ws_ex_adem ? 9'b1 : 9'b0;
+ 
+ always @(posedge clk) begin
+     if (reset) begin
+

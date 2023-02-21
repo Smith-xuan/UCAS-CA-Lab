@@ -1,0 +1,80 @@
+--- D:\国科大通知\体系结构实验\lab8_exp19_69\myCPU1\IF_stage.v
++++ D:\国科大通知\体系结构实验\lab8_exp19_69\myCPU\IF_stage.v
+@@ -71,6 +71,7 @@
+ wire        fs_allowin;
+ wire        to_fs_valid;
+ wire        to_fs_ready_go;
++wire dir;
+ 
+ 
+ wire         blk_valid;
+@@ -79,11 +80,12 @@
+ wire [ 31:0] br_target;
+ assign {blk_valid,br_taken,br_target} = br_blk_data;
+ 
++wire [5:0]  tlb_ex_bus;
+ wire [31:0] fs_inst;
+ reg  [31:0] fs_pc;
+ reg         fake_ex_reflush;
+ reg         ex_adef;
+-assign      fs_to_ds_data = {fs_inst, fs_pc, ex_adef, fake_ex_reflush};
++assign      fs_to_ds_data = {tlb_ex_bus ,fs_inst, fs_pc, ex_adef, fake_ex_reflush};
+                        
+ reg         fs_inst_buff_valid;
+ reg  [31:0] fs_inst_buff;
+@@ -96,11 +98,10 @@
+ assign to_fs_valid    = pfs_valid && to_fs_ready_go;
+ assign to_fs_ready_go = inst_sram_req & inst_sram_addr_ok ;
+ 
+-assign fs_ready_go    = (!cancel && !br_cancel && inst_sram_data_ok) | fs_inst_buff_valid|(wb_ex | wb_ertn_flush);
++assign fs_ready_go    = (!cancel && !br_cancel && inst_sram_data_ok) | fs_inst_buff_valid | (wb_ex | wb_ertn_flush/* | (|tlb_ex_bus)*/);
+ assign fs_allowin     = !fs_valid || fs_ready_go && ds_allowin;
+ assign fs_to_ds_valid =  fs_valid && fs_ready_go && !wb_ex && !wb_ertn_flush;
+ 
+-wire [5:0]  tlb_ex_bus;
+ 
+ always @(posedge clk) begin
+      if(reset) begin
+@@ -178,7 +179,7 @@
+ assign seq_pc = fs_pc+32'h4;
+     
+                                        
+-assign inst_sram_req   = pfs_valid & fs_allowin ;
++assign inst_sram_req   = pfs_valid & fs_allowin;
+ //assign inst_sram_addr  = next_pc;  in the v2p moudle
+ assign fs_inst         = fs_inst_buff_valid ? fs_inst_buff : inst_sram_rdata;
+ 
+@@ -199,14 +200,14 @@
+     if (reset) begin
+         fs_pc <= 32'h_1bfffffc;  //trick: to make next_pc be 0x1c000000 during reset 
+     end
+-    else if (to_fs_valid && (fs_allowin || wb_ex || wb_ertn_flush)) begin
++    else if (to_fs_valid && (fs_allowin || wb_ex || wb_ertn_flush || {|tlb_ex_bus})) begin
+         fs_pc <= next_pc;
+     end
+    
+-    if (next_pc[1:0] != 2'b00) begin
++    if (next_pc[1:0] != 2'b00 || next_pc >= `ADDR_MAX && !dir) begin
+         ex_adef <= 1'b1;
+     end
+-    else if (next_pc[1:0] == 2'b00) begin
++    else if (next_pc[1:0] == 2'b00 || next_pc < `ADDR_MAX || next_pc >= `ADDR_MAX && dir) begin
+         ex_adef <= 1'b0;
+     end
+ 
+@@ -233,13 +234,13 @@
+         fs_inst_buff        <= 32'h0;
+         end
+ end
+-
+ //v2p
+ vaddr_transfer inst_transfer(
+     .va        (next_pc),
+     .inst_op   (3'b001),//{load.store,if}
+     .pa        (inst_sram_addr),
+     .tlb_ex_bus(tlb_ex_bus),//{PME,PPE,PIS,PIL,PIF,TLBR}
++    .adem_judge(dir),
+     //tlb
+     .s_vppn    (s0_vppn),
+     .s_va_bit12(s0_va_bit12),
+

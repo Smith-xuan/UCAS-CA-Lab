@@ -1,0 +1,131 @@
+--- D:\国科大通知\体系结构实验\lab8_exp19_69\myCPU1\EX_stage.v
++++ D:\国科大通知\体系结构实验\lab8_exp19_69\myCPU\EX_stage.v
+@@ -52,6 +52,7 @@
+     input  wire                             ms_ex           ,
+     input  wire                             ms_ertn_flush   ,
+     output wire [`ES_CSR_BLK_DATA_WD -1:0]  es_csr_blk_data ,
++    output wire                             es_tlbsrch_blk  ,
+ 
+     // search port 0 
+     output wire[              18:0] s1_vppn,
+@@ -128,6 +129,11 @@
+ wire        es_ex_ine      ;
+ wire        es_has_int     ;
+ wire        es_ex_ale      ;
++wire        es_ex_adem     ;
++wire        es_ex_pis      ;
++wire        es_ex_pil      ;
++wire        es_ex_tlbr     ;
++wire        es_ex_ppe      ;
+ wire        es_ex_valid    ;
+ wire        es_ertn_flush;
+ wire [13:0] es_csr_num;
+@@ -137,16 +143,18 @@
+ wire        es_inst_rdcntvl_w;
+ wire        es_inst_rdcntvh_w;
+ wire [31:0] es_vaddr;
++wire        direct;
+ 
+ //tlb
+ wire [4:0]  tlb_bus;
+ wire [4:0]  op;
+ wire [5:0]  tlb_ex_bus;
++wire [5:0]  es_tlb_ex_bus;
+ wire [18:0] ls_vppn;
+ wire        ls_va_bit12;
+ wire [9:0]  ls_asid;
+ wire [2:0]  inst_op;
+-wire        tlbsrch_hit;
++//wire        tlbsrch_hit;
+ wire        es_fake_ex_reflush;
+ wire [4:0]  inv_op;
+ 
+@@ -156,6 +164,7 @@
+ wire [31:0] es_rdtimer;
+ wire es_st_op;
+ assign {
++    es_tlb_ex_bus,//+6
+     es_fake_ex_reflush, //+1
+     tlb_bus        , //+5
+     inv_op         , //+5
+@@ -211,6 +220,8 @@
+ 
+ assign es_res_from_mem  = es_load_op;
+ assign es_to_ms_data = {
++    es_ex_adem,
++    es_tlb_ex_bus == 6'b0 ? tlb_ex_bus : es_tlb_ex_bus, //+6
+     es_fake_ex_reflush, //+1
+     tlb_bus         ,  //+5
+     es_load_op      ,  //234
+@@ -258,6 +269,7 @@
+     es_rf_data,     // 32:1
+     es_blk_valid    // 0:0
+ };
++assign es_tlbsrch_blk = ((es_inst_csrwr || es_inst_csrxchg) && (es_csr_num == `CSR_ASID || es_csr_num == `CSR_TLBEHI) || tlb_bus[3]) && es_valid;
+ 
+ assign es_alu_src1 = es_src1_is_pc  ? es_pc  :
+                                       es_rj_value;
+@@ -266,7 +278,7 @@
+ assign es_csr_wvalue    = es_rkd_value;
+ assign es_csr_wmask     = es_inst_csrwr ? 32'hffffffff : es_rj_value;
+ assign es_csr_we_valid  = es_csr_we && es_valid;
+-assign es_ex_valid      = (es_ex_syscall | es_ex_adef | es_ex_ale | es_ex_break | es_has_int | es_ex_ine | es_fake_ex_reflush) && es_valid;
++assign es_ex_valid      = (es_ex_syscall | es_ex_adef | es_ex_adem | es_ex_ale | es_ex_break | es_has_int | es_ex_ine | es_fake_ex_reflush | (|(es_tlb_ex_bus | tlb_ex_bus))) && es_valid;
+ assign es_csr_blk_valid = !es_res_from_mem && (es_inst_csr | es_inst_rdcntid | es_inst_rdcntvl_w | es_inst_rdcntvh_w) && es_valid; // rdcnt included
+ assign es_csr_blk_data  = {es_csr_blk_valid, es_csr_num};
+ 
+@@ -275,8 +287,9 @@
+ 
+ assign es_ex_ale = (((es_inst_ld_h | es_inst_ld_hu | es_inst_st_h) & (es_alu_result[0] != 0))
+                     | ((es_inst_ld_w | es_inst_st_w) & (es_alu_result[1:0] != 2'b00))) & es_valid;
+-
+-assign es_vaddr = es_alu_result; 
++assign es_ex_adem = (es_alu_result >= `ADDR_MAX && (es_res_from_mem || es_mem_we) && !direct) ? 1'b1 : 1'b0;
++
++assign es_vaddr = es_tlb_ex_bus == 6'b0 ? es_alu_result : es_pc; 
+ 
+ // a 64bit timer for rdcntvl_w and rdcnttvh_w
+ always @(posedge clk) begin
+@@ -336,7 +349,7 @@
+                  es_inst_st_h ? {2{es_rkd_value[15:0]}}:
+                                     es_rkd_value[31:0] ;
+ 
+-assign data_sram_req   = es_valid && ms_allowin && (es_load_op|es_st_op ) && !es_ex_ale && !es_fake_ex_reflush;
++assign data_sram_req   = es_valid && ms_allowin && (es_load_op|es_st_op ) && !es_ex_ale && !(|tlb_ex_bus) && !(|es_tlb_ex_bus) && !es_fake_ex_reflush;
+ assign data_sram_wr    = es_load_op ? 1'b0 : 1'b1;
+ assign data_sram_size  = es_load_op ? 2'h2 : st_size;
+ assign data_sram_wstrb    = (es_valid & es_mem_we & !es_ex_ale & !es_fake_ex_reflush & !wb_ex & !wb_ertn_flush & !ms_ex & !ms_ertn_flush) ? st_op : 4'h0;
+@@ -393,7 +406,7 @@
+     
+ assign es_blk_valid = es_valid && es_res_from_mem ;
+ 
+-assign es_ready_go    = (wb_ex || wb_ertn_flush)  ? 1'b1:
++assign es_ready_go    = (wb_ex || wb_ertn_flush || tlb_ex_bus || es_tlb_ex_bus)  ? 1'b1:
+     (es_inst_div_w|es_inst_mod_w)   ? signed_dout_tvalid   :
+     (es_inst_div_wu|es_inst_mod_wu) ? unsigned_dout_tvalid :
+     (es_load_op|es_st_op)?   (data_sram_req & data_sram_addr_ok) | es_ex_ale | es_fake_ex_reflush:
+@@ -494,7 +507,7 @@
+ 
+ 
+ //transfer | tlbsrch | invtlb
+-assign tlbop_bus_es = tlb_bus;
++assign tlbop_bus_es = tlb_bus & {5{es_valid && !(|tlb_ex_bus)}};
+ assign tlbsrch_hit = tlb_bus[4] & s1_found;
+ assign csr_tlbidx_wvalue_es = {~s1_found,
+                             1'b0,
+@@ -510,12 +523,13 @@
+ assign s1_asid = (es_res_from_mem||es_mem_we)? ls_asid:tlb_bus[0]?es_rj_value[9:0] : csr_asid_rvalue[9:0];
+ assign s1_va_bit12  = (es_res_from_mem||es_mem_we)?ls_va_bit12:1'b0;
+ 
+-assign inst_op = {es_res_from_mem,es_mem_we,1'b0};
++assign inst_op = {es_res_from_mem, es_mem_we, 1'b0};
+ vaddr_transfer data_transfer(
+     .va        (es_alu_result),
+     .inst_op   (inst_op),//{load.store,if}
+     .pa        (data_sram_addr),
+     .tlb_ex_bus(tlb_ex_bus),//{PME,PPE,PIS,PIL,PIF,TLBR}
++    .adem_judge(direct),
+     //tlb
+     .s_vppn    (ls_vppn),
+     .s_va_bit12(ls_va_bit12),
+

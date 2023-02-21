@@ -1,0 +1,64 @@
+--- D:\国科大通知\体系结构实验\lab8_exp19_69\myCPU1\MEM_stage.v
++++ D:\国科大通知\体系结构实验\lab8_exp19_69\myCPU\MEM_stage.v
+@@ -43,7 +43,8 @@
+     input  wire                            wb_ertn_flush,
+     output wire                            ms_ex_valid  ,
+     output wire                            ms_ertn_valid,
+-    output wire [`MS_CSR_BLK_DATA_WD -1:0] ms_csr_blk_data   
++    output wire [`MS_CSR_BLK_DATA_WD -1:0] ms_csr_blk_data,
++    output wire                            ms_tlbsrch_blk
+     );
+ reg         ms_valid;
+ wire        ms_ready_go;
+@@ -67,9 +68,11 @@
+ wire        ms_ex_syscall;
+ wire        ms_ex_break  ;
+ wire        ms_ex_adef   ;
++wire        ms_ex_adem   ;
+ wire        ms_ex_ale    ;
+ wire        ms_ex_ine    ;
+ wire        ms_has_int   ;
++wire [5:0]  ms_tlb_ex_bus;
+ wire        ms_ex_valid_o;
+ wire        ms_ertn;
+ wire [13:0] ms_csr_num;
+@@ -92,6 +95,8 @@
+ reg[31:0] ms_data_buff;
+ wire ms_fake_ex_reflush;
+ assign {
++    ms_ex_adem,
++    ms_tlb_ex_bus,//+6
+     ms_fake_ex_reflush, //+1
+     tlb_bus         ,//+5
+     ms_load_op      ,
+@@ -132,6 +137,8 @@
+ wire [31:0] ms_final_result;
+ 
+ assign ms_to_ws_data = {
++    ms_ex_adem,
++    ms_tlb_ex_bus,//+6
+     ms_fake_ex_reflush,  //+1
+     tlb_bus        ,  //+5
+     ms_inst_csrxchg,  //225
+@@ -170,17 +177,18 @@
+     ms_rf_data      // 31:0
+ };
+ 
+-assign ms_ex_valid = (ms_ex_syscall | ms_ex_adef | ms_ex_ale | ms_ex_break | ms_has_int | ms_ex_ine | ms_fake_ex_reflush) && ms_valid;
++assign ms_ex_valid = (ms_ex_syscall | ms_ex_adef | ms_ex_adem | ms_ex_ale | ms_ex_break | ms_has_int | ms_ex_ine | ms_fake_ex_reflush | (|ms_tlb_ex_bus)) && ms_valid;
+ assign ms_csr_we_valid = ms_csr_we && ms_valid;
+ assign ms_ertn_valid = ms_ertn && ms_valid;
+ 
+-assign ms_ready_go    =  (wb_ex || wb_ertn_flush)  ? 1'b1:
++assign ms_ready_go    =  (wb_ex || wb_ertn_flush || ms_tlb_ex_bus)  ? 1'b1:
+                           (ms_load_op|ms_st_op) ? (data_sram_data_ok | ms_data_buff_valid | ms_ex_ale| ms_fake_ex_reflush) :
+                            1'b1;
+ assign ms_allowin     = !ms_valid || ms_ready_go && ws_allowin;
+ assign ms_to_ws_valid = ms_valid && ms_ready_go && !wb_ex && !wb_ertn_flush;
+ assign ms_csr_blk_valid = !ms_res_from_mem && (ms_inst_csr | ms_inst_rdcntid | ms_inst_rdcntvl_w | ms_inst_rdcntvh_w) && ms_valid;
+ assign ms_csr_blk_data = {ms_csr_blk_valid, ms_csr_num};
++assign ms_tlbsrch_blk = ((ms_inst_csrwr || ms_inst_csrxchg) && (ms_csr_num == `CSR_ASID || ms_csr_num == `CSR_TLBEHI) || tlb_bus[3]) && ms_valid;
+ 
+ always @(posedge clk) begin
+     if (reset) begin
+

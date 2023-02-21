@@ -1,0 +1,119 @@
+--- D:\国科大通知\体系结构实验\lab7_exp16_69\mycup1\IF_stage.v
++++ D:\国科大通知\体系结构实验\lab7_exp16_69\myCPU\IF_stage.v
+@@ -65,11 +65,24 @@
+ reg  [31:0] fs_inst_buff;
+ reg         cancel;
+ reg         cancel_flag;
+-reg         cancel_2;
+ wire        pfs_valid;
++
++
++wire [31:0] seq_pc;
++wire [31:0] next_pc;
++reg  [31:0] pc_buff_br;
++reg         pc_buff_br_valid;
++reg  [31:0] pc_buff_ex;
++reg         pc_buff_ex_valid;
++
++reg cancel_req;
++reg [1:0] cancel_req_count;
++reg [1:0] req_count;
+ assign pfs_valid     = ~reset;
+ assign to_fs_valid    = pfs_valid && to_fs_ready_go;
+-assign to_fs_ready_go = inst_sram_req & inst_sram_addr_ok & !cancel;
++assign to_fs_ready_go = (inst_sram_req | cancel_req) & inst_sram_addr_ok
++                        || (pc_buff_ex_valid && !(inst_sram_data_ok && !cancel))
++                        || (pc_buff_br_valid && !(inst_sram_data_ok && !cancel));
+ 
+ assign fs_ready_go    = | (!cancel && inst_sram_data_ok) | fs_inst_buff_valid|(wb_ex | wb_ertn_flush);
+ assign fs_allowin     = fs_valid && cancel || !fs_valid || fs_ready_go && ds_allowin;
+@@ -95,35 +108,64 @@
+      end
+ end
+ 
++always@(posedge clk)begin
++    if(reset)begin
++        cancel_req_count <= 2'b00;
++    end else if(cancel && inst_sram_addr_ok && !inst_sram_data_ok)begin
++        cancel_req_count <= cancel_req_count + 2'b01;
++    end else if(cancel_req_count != 2'b00 && inst_sram_data_ok && !inst_sram_addr_ok)begin
++        cancel_req_count <= cancel_req_count - 2'b01;
++    end
++
++    
++end
++        
++always @(posedge clk)begin
++    if(reset)begin
++        req_count <= 2'b00;
++    end else if(inst_sram_addr_ok && !inst_sram_data_ok)begin
++        req_count <= req_count + 2'b01;
++    end else if(!inst_sram_addr_ok && inst_sram_data_ok)begin
++        req_count <= req_count - 2'b01;
++    end
++    
++    if(reset)begin
++        cancel_req <= 1'b0;
++    end else if(req_count == 2'b01 && inst_sram_addr_ok && !inst_sram_data_ok)begin
++        cancel_req <= 1'b1;
++    end else if(req_count == 2'b01 && !inst_sram_addr_ok && inst_sram_data_ok)begin
++        cancel_req <= 1'b0;
++    end
++end
++
+ // pc control
+-wire [31:0] seq_pc;
+-wire [31:0] next_pc;
+-reg  [31:0] pc_buff_br;
+-reg         pc_buff_br_valid;
+-reg  [31:0] pc_buff_ex;
+-reg         pc_buff_ex_valid;
+ always @ (posedge clk) begin
+     if (reset) begin
+         pc_buff_br_valid  <= 1'b0;
+         pc_buff_br        <= 32'h0;
++    end else if (br_taken) begin
++        pc_buff_br_valid  <= 1'b1;
++        pc_buff_br        <= br_target;
++    end else if (inst_sram_data_ok && !cancel) begin
++        pc_buff_br_valid  <= 1'b0;
++        pc_buff_br        <= 32'h0;
++    end
++        
++    if (reset) begin
+         pc_buff_ex_valid  <= 1'b0;
+         pc_buff_ex        <= 32'h0;
+-    end else if ( (wb_ex|wb_ertn_flush) && !to_fs_ready_go) begin
++    end else if (wb_ex|wb_ertn_flush) begin
+         pc_buff_ex_valid  <= 1'b1;
+         pc_buff_ex        <= csr_pc;
+-    end else if (br_taken && !to_fs_ready_go) begin
+-        pc_buff_br_valid  <= 1'b1;
+-        pc_buff_br        <= br_target;
+-    end else if (to_fs_ready_go) begin
+-        pc_buff_br_valid  <= 1'b0;
+-        pc_buff_br        <= 32'h0;
++    end else if(inst_sram_data_ok && !cancel)begin
+         pc_buff_ex_valid  <= 1'b0;
+         pc_buff_ex        <= 32'h0;
+     end
+ end
+-assign next_pc = pc_buff_ex_valid ?         pc_buff_ex :
++
++assign next_pc = (pc_buff_ex_valid && !(inst_sram_data_ok && !cancel)) ?         pc_buff_ex :
+                  wb_ex|wb_ertn_flush ?      csr_pc  :
+-                 pc_buff_br_valid    ?      pc_buff_br:
++                 (pc_buff_br_valid && !(inst_sram_data_ok && !cancel))  ?      pc_buff_br:
+                  !fs_allowin          ?     fs_pc:
+                  br_taken            ?      br_target:
+                                             seq_pc;
+@@ -131,7 +173,7 @@
+ assign seq_pc = fs_pc+32'h4;
+     
+                                        
+-assign inst_sram_req   = pfs_valid & fs_allowin ;
++assign inst_sram_req   = pfs_valid & fs_allowin & !cancel_req;
+ assign inst_sram_addr  = next_pc;
+ assign fs_inst         = fs_inst_buff_valid ? fs_inst_buff : inst_sram_rdata;
+ 
+
